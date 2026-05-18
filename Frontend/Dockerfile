@@ -8,7 +8,11 @@ RUN npm ci
 FROM base AS builder
 WORKDIR /app
 COPY . .
-ENV NEXT_PUBLIC_API_URL=http://placeholder/api
+
+# 🔥 FIXED: Accept the dynamic API URL from the GitHub Actions build argument
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 RUN npm run build
 
 # --- Stage 3: Dynamic Production Runtime ---
@@ -16,6 +20,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules

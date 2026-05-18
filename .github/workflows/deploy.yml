@@ -104,12 +104,21 @@ jobs:
         run: |
           aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin ${{ steps.identity.outputs.account_id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
 
+      # 🔥 FIXED: Added --build-arg with the dynamic Terraform Load Balancer output to fix "Failed to fetch"
       - name: "Build, Tag, and Push Production Frontend Image"
         run: |
-          ECR_URL="${{ steps.identity.outputs.account_id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.PROJECT_NAME }}-frontend"
+          ACCOUNT_ID=${{ steps.identity.outputs.account_id }}
+          REGION=${{ vars.AWS_REGION }}
+          PROJECT=${{ vars.PROJECT_NAME }}
           TAG="${{ steps.tags.outputs.tag }}"
           
-          docker build -t "$ECR_URL:$TAG" -t "$ECR_URL:latest" ./Frontend
+          ALB_DNS=$(terraform -chdir=infra/terraform output -raw app_url)
+          ECR_URL="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$PROJECT-frontend"
+          
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL="http://$ALB_DNS/api" \
+            -t "$ECR_URL:$TAG" -t "$ECR_URL:latest" ./Frontend
+            
           docker push "$ECR_URL:$TAG"
           docker push "$ECR_URL:latest"
 
