@@ -44,7 +44,7 @@ jobs:
         run: docker compose config
 
       - name: "Dry-Run Frontend Container Build"
-        run: docker build --target=base ./Frontend
+        run: docker build ./Frontend
 
       - name: "Dry-Run Deep Recon Backend Container Build"
-        run: docker build --target=base ./backend
+        run: docker build ./backend
