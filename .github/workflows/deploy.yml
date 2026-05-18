@@ -116,7 +116,7 @@ jobs:
           ECR_URL="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$PROJECT-frontend"
           
           docker build \
-            --build-arg NEXT_PUBLIC_API_URL="http://$ALB_DNS/api" \
+            --build-arg NEXT_PUBLIC_API_URL="$ALB_DNS/api" \
             -t "$ECR_URL:$TAG" -t "$ECR_URL:latest" ./Frontend
             
           docker push "$ECR_URL:$TAG"

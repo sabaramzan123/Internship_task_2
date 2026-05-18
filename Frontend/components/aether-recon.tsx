@@ -130,9 +130,21 @@ export default function AetherRecon() {
     setTerminalOutput([`>> Deploying: ${opContext.toUpperCase()} reconnaissance module for ${target}...`]);
 
     try {
-      // 🔥 FIXED: Dynamically capture process environment variables with a clean fallback pattern to prevent localhost binding
-      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "/api";
+      // 🚀 Clean and absolute protocol sanitization layer
+      let apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "/api";
       
+      // Variable cleanups to actively discard structural typos like http://http//
+      if (apiBaseUrl.startsWith("http://http//")) {
+        apiBaseUrl = apiBaseUrl.replace("http://http//", "http://");
+      } else if (apiBaseUrl.startsWith("http//")) {
+        apiBaseUrl = apiBaseUrl.replace("http//", "http://");
+      }
+      
+      // Final security check: ensure it starts cleanly with a single protocol if not relative
+      if (!apiBaseUrl.startsWith("http://") && !apiBaseUrl.startsWith("https://") && !apiBaseUrl.startsWith("/")) {
+        apiBaseUrl = `http://${apiBaseUrl}`;
+      }
+
       const endpoint = pipeline
         ? `${apiBaseUrl}/scan?target=${target}`
         : `${apiBaseUrl}/scan/${tool?.toLowerCase()}?target=${target}`;
@@ -158,8 +170,7 @@ export default function AetherRecon() {
         const normalizedTool = tool ? tool.toLowerCase() : "";
 
         // 🔥 Case-Insensitive State Mapping Rules Execution Engine
-        // [COMMENTED OUT AMASS FROM DISCOVERY POOL]
-        if (normalizedTool === "subfinder" || normalizedTool === "assetfinder" /* || normalizedTool === "amass" */) {
+        if (normalizedTool === "subfinder" || normalizedTool === "assetfinder") {
           setDiscoveredAssets(prev => prev + totalCount); 
           const mappedAssets = resultsList.map((sub: string) => ({ 
             url: sub, 
@@ -168,8 +179,7 @@ export default function AetherRecon() {
           }));
           setInventoryTable(prev => [...mappedAssets, ...prev]);
 
-        // [COMMENTED OUT HTTPPROBE FROM HTTP MAPPING STREAM]
-        } else if (normalizedTool === "httpx" /* || normalizedTool === "httpprobe" */) {
+        } else if (normalizedTool === "httpx") {
           setActiveHosts(prev => prev + totalCount);
           const mappedHosts = resultsList.map((line: string) => ({ 
             url: line.split(" ")[0], 
@@ -191,7 +201,6 @@ export default function AetherRecon() {
         } else if (normalizedTool === "nmap") {
           setExposedPorts(totalCount);
         } else if (normalizedTool === "whatweb" || normalizedTool === "waybackurls" || normalizedTool === "gau") {
-          // Capturing general intelligence stream sizes into general console metrics
           setDiscoveredAssets(prev => prev + totalCount);
         }
       }
@@ -295,7 +304,7 @@ export default function AetherRecon() {
             { label: "Subdomains Discovered", value: discoveredAssets },
             { label: "Live Active Hosts", value: activeHosts },
             { label: "Exposed TCP Ports", value: exposedPorts },
-            { label: "Cloud Buckets Mapped", value: cloudBuckets }, // 🔥 Hooked to CloudEnum state mapping updates
+            { label: "Cloud Buckets Mapped", value: cloudBuckets },
           ].map((stat, idx) => (
             <div key={idx} className="metric-card text-center will-change-transform">
               <div className={`${playfair.className} text-4xl md:text-5xl font-normal text-[#09090b] mb-1.5 tracking-tight`}>{stat.value}</div>
