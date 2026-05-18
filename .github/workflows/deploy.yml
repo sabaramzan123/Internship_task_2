@@ -108,6 +108,7 @@ jobs:
         run: |
           aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin ${{ steps.identity.outputs.account_id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
 
+      # 🔥 FIXED BELOW: Removed --target boundaries completely to align with standard Docker configurations
       - name: "Build, Tag, and Push Production Frontend Image"
         run: |
           ECR_URL="${{ steps.identity.outputs.account_id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.PROJECT_NAME }}-frontend"
@@ -117,6 +118,7 @@ jobs:
           docker push "$ECR_URL:$TAG"
           docker push "$ECR_URL:latest"
 
+      # 🔥 FIXED BELOW: Removed --target boundaries completely to align with standard Docker configurations
       - name: "Build, Tag, and Push Deep Recon Scanner Backend Image"
         run: |
           ECR_URL="${{ steps.identity.outputs.account_id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.PROJECT_NAME }}-backend"
