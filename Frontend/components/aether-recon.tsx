@@ -130,19 +130,13 @@ export default function AetherRecon() {
     setTerminalOutput([`>> Deploying: ${opContext.toUpperCase()} reconnaissance module for ${target}...`]);
 
     try {
-      // 🚀 Clean and absolute protocol sanitization layer
-      let apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "/api";
-      
-      // Variable cleanups to actively discard structural typos like http://http//
-      if (apiBaseUrl.startsWith("http://http//")) {
-        apiBaseUrl = apiBaseUrl.replace("http://http//", "http://");
-      } else if (apiBaseUrl.startsWith("http//")) {
-        apiBaseUrl = apiBaseUrl.replace("http//", "http://");
-      }
-      
-      // Final security check: ensure it starts cleanly with a single protocol if not relative
-      if (!apiBaseUrl.startsWith("http://") && !apiBaseUrl.startsWith("https://") && !apiBaseUrl.startsWith("/")) {
-        apiBaseUrl = `http://${apiBaseUrl}`;
+      // 🚀 Universal Runtime Location Decoder (No Env Variable Dependency)
+      let apiBaseUrl = "";
+      if (typeof window !== "undefined") {
+        // Automatically bindings to http://localhost:3000/api or live AWS ALB /api
+        apiBaseUrl = `${window.location.protocol}//${window.location.host}/api`;
+      } else {
+        apiBaseUrl = "/api";
       }
 
       const endpoint = pipeline
