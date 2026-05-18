@@ -1,0 +1,28 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SystemGlobalCoreInfrastructureReadWriteSupport",
+      "Effect": "Allow",
+      "Action": [
+        "s3:*",
+        "sts:GetCallerIdentity",
+        "ec2:*",
+        "ecr:*",
+        "ecs:*",
+        "elasticloadbalancing:*",
+        "iam:*",
+        "logs:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "InteractiveSecureTaskExecSupport",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ExecuteCommand"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

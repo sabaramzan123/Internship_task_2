@@ -1,0 +1,141 @@
+name: "03 - Continuous Deployment Pipeline"
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/deploy.yml"
+      - "Frontend/**"
+      - "backend/**"
+      - "infra/**"
+  workflow_dispatch:
+    inputs:
+      override_image_tag:
+        description: "Specify explicit alternate runtime image tracking tag override"
+        required: false
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deployment-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: "AWS Enterprise Pipeline Rollout"
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: "Checkout Codebase"
+        uses: actions/checkout@v4
+
+      - name: "Initialize Terraform Engine"
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.8"
+
+      - name: "Enforce Variable Assertion Validation"
+        run: |
+          if [ -z "${{ vars.TF_STATE_BUCKET }}" ] || [ -z "${{ vars.AWS_ROLE_TO_ASSUME }}" ]; then
+            echo "::error::System context configuration fault: Core pipeline deployment variables missing."
+            exit 1
+          fi
+
+      - name: "Configure AWS Credentials via OIDC"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: "Verify Remote Storage Environment"
+        run: |
+          if ! aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET }}" 2>/dev/null; then
+            echo "::error::Remote State Storage Target does not exist. Run Bootstrap process first."
+            exit 1
+          fi
+
+      - name: "Determine Deterministic Image Run-Tag"
+        id: tags
+        run: |
+          if [ -n "${{ github.event.inputs.override_image_tag }}" ]; then
+            echo "tag=${{ github.event.inputs.override_image_tag }}" >> $GITHUB_OUTPUT
+          else
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-12)
+            echo "tag=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "Render Dynamic Backend Configuration HCL Descriptor"
+        run: |
+          cat <<EOF > infra/terraform/backend.hcl
+          bucket       = "${{ vars.TF_STATE_BUCKET }}"
+          key          = "${{ vars.TF_STATE_KEY }}"
+          region       = "${{ vars.AWS_REGION }}"
+          use_lockfile = true
+          EOF
+
+      - name: "Execute Initialized System Handshake"
+        run: terraform -chdir=infra/terraform init -backend-config=backend.hcl
+
+      - name: "Inspect Platform Capability Bootstrap Dependencies Status"
+        id: checkpoint
+        run: |
+          REPO_NAME="${{ vars.PROJECT_NAME }}-frontend"
+          if aws ecr describe-repositories --repository-names "$REPO_NAME" --region "${{ vars.AWS_REGION }}" 2>/dev/null; then
+            echo "bootstrap_required=false" >> $GITHUB_OUTPUT
+          else
+            echo "bootstrap_required=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "Phase 1 Rollout: Initial Infrastructure & Core ECR Repositories Only"
+        if: steps.checkpoint.outputs.bootstrap_required == 'true'
+        run: |
+          terraform -chdir=infra/terraform apply -auto-approve \
+            -var="image_tag=${{ steps.tags.outputs.tag }}" \
+            -var="deploy_ecs_services=false"
+
+      - name: "Extract Account Identity Target Bounds"
+        id: identity
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+          echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
+
+      - name: "Authenticate Local Docker Daemon against ECR Endpoint"
+        run: |
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin ${{ steps.identity.outputs.account_id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+
+      - name: "Build, Tag, and Push Production Frontend Image"
+        run: |
+          ECR_URL="${{ steps.identity.outputs.account_id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.PROJECT_NAME }}-frontend"
+          TAG="${{ steps.tags.outputs.tag }}"
+          
+          docker build -t "$ECR_URL:$TAG" -t "$ECR_URL:latest" ./Frontend
+          docker push "$ECR_URL:$TAG"
+          docker push "$ECR_URL:latest"
+
+      - name: "Build, Tag, and Push Deep Recon Scanner Backend Image"
+        run: |
+          ECR_URL="${{ steps.identity.outputs.account_id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.PROJECT_NAME }}-backend"
+          TAG="${{ steps.tags.outputs.tag }}"
+          
+          docker build -t "$ECR_URL:$TAG" -t "$ECR_URL:latest" ./backend
+          docker push "$ECR_URL:$TAG"
+          docker push "$ECR_URL:latest"
+
+      - name: "Phase 2 Rollout: Final Live Service Converged Target State"
+        run: |
+          terraform -chdir=infra/terraform apply -auto-approve \
+            -var="image_tag=${{ steps.tags.outputs.tag }}" \
+            -var="deploy_ecs_services=true"
+
+      - name: "Generate Job Architecture Runtime Markdown Summary"
+        run: |
+          ALB_DNS=$(terraform -chdir=infra/terraform output -raw app_url)
+          echo "### 🚀 AetherRecon Operational Cluster Status" >> $GITHUB_STEP_SUMMARY
+          echo "Deployment successful for version tag \`${{ steps.tags.outputs.tag }}\`." >> $GITHUB_STEP_SUMMARY
+          echo "* **Frontend Client Access Endpoint:** $ALB_DNS" >> $GITHUB_STEP_SUMMARY
+          echo "* **Decoupled API Routing Target Gateway:** ${ALB_DNS}/api" >> $GITHUB_STEP_SUMMARY

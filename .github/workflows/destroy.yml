@@ -1,0 +1,90 @@
+name: "04 - De-provision and Destroy Infrastructure"
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_confirmation:
+        description: "Verify intent by explicitly spelling out the active target project name"
+        required: true
+        default: ""
+      purge_remote_state_storage:
+        description: "Force drop bucket tracking artifacts and eliminate state storage bucket permanently? (true/false)"
+        required: true
+        default: "false"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deployment-production
+  cancel-in-progress: false
+
+jobs:
+  teardown:
+    name: "Teardown Production Infrastructure"
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: "Checkout Codebase"
+        uses: actions/checkout@v4
+
+      - name: "Enforce Project Safety Assertion Gate"
+        if: ${{ github.event.inputs.project_confirmation != vars.PROJECT_NAME }}
+        run: |
+          echo "::error::Destruction sequence dropped. Name confirmation fails compliance check."
+          exit 1
+
+      - name: "Initialize Terraform Engine"
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.8"
+
+      - name: "Configure AWS Credentials via OIDC"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: "Render Dynamic Backend Configuration HCL Descriptor"
+        run: |
+          cat <<EOF > infra/terraform/backend.hcl
+          bucket       = "${{ vars.TF_STATE_BUCKET }}"
+          key          = "${{ vars.TF_STATE_KEY }}"
+          region       = "${{ vars.AWS_REGION }}"
+          use_lockfile = true
+          EOF
+
+      - name: "Execute Initialized System Handshake"
+        run: terraform -chdir=infra/terraform init -backend-config=backend.hcl
+
+      - name: "Destroy Active Orchestration Stack Assets"
+        run: |
+          terraform -chdir=infra/terraform destroy -auto-approve \
+            -var="deploy_ecs_services=true"
+
+      - name: "Purge Dynamic ECR Image Repositories"
+        run: |
+          echo "Purging backend utility image registries..."
+          aws ecr delete-repository --repository-name "${{ vars.PROJECT_NAME }}-backend" --region "${{ vars.AWS_REGION }}" --force 2>/dev/null || true
+          aws ecr delete-repository --repository-name "${{ vars.PROJECT_NAME }}-frontend" --region "${{ vars.AWS_REGION }}" --force 2>/dev/null || true
+
+      - name: "Execute Conditional S3 State Destruction Lifecycle Policy Run"
+        if: ${{ github.event.inputs.purge_remote_state_storage == 'true' }}
+        run: |
+          BUCKET_NAME="${{ vars.TF_STATE_BUCKET }}"
+          echo "Purging all cryptographic state object versions inside: ${BUCKET_NAME}..."
+          
+          # Delete all object versions
+          aws s3api delete-objects --bucket "$BUCKET_NAME" \
+            --delete "$(aws s3api list-object-versions --bucket "$BUCKET_NAME" --query '{Objects: Versions[].{Key: Key, VersionId: VersionId}}' --output json)" 2>/dev/null || true
+            
+          # Delete all delete markers
+          aws s3api delete-objects --bucket "$BUCKET_NAME" \
+            --delete "$(aws s3api list-object-versions --bucket "$BUCKET_NAME" --query '{Objects: DeleteMarkers[].{Key: Key, VersionId: VersionId}}' --output json)" 2>/dev/null || true
+            
+          echo "Eliminating empty structural wrapper bucket instance..."
+          aws s3api delete-bucket --bucket "$BUCKET_NAME" --region "${{ vars.AWS_REGION }}"
+          echo "::notice::State storage configuration entirely eradicated."

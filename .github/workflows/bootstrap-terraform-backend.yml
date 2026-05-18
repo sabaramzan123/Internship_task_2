@@ -1,0 +1,80 @@
+name: "01 - Bootstrap Terraform Infrastructure"
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_bootstrap:
+        description: "Type 'CONFIRM' to bootstrap the remote state S3 bucket"
+        required: true
+        default: "NO"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: bootstrap-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    name: "AWS S3 Backend Initialization"
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: "Enforce Confirmation Check"
+        if: ${{ github.event.inputs.confirm_bootstrap != 'CONFIRM' }}
+        run: |
+          echo "::error::Bootstrap authorization sequence denied. Input must be explicit 'CONFIRM'."
+          exit 1
+
+      - name: "Configure AWS Credentials via OIDC"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: "Deploy Encrypted S3 Remote State Bucket"
+        run: |
+          BUCKET_NAME="${{ vars.TF_STATE_BUCKET }}"
+          REGION="${{ vars.AWS_REGION }}"
+          
+          echo "Checking status of target state bucket: ${BUCKET_NAME}..."
+          if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+            echo "::notice::S3 Remote State Bucket already exists. Skipping initialization."
+          else
+            echo "Provisioning new secure remote state tracking infrastructure..."
+            
+            if [ "$REGION" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION"
+            else
+              aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION" \
+                --create-bucket-configuration LocationConstraint="$REGION"
+            fi
+            
+            aws s3api put-bucket-versioning --bucket "$BUCKET_NAME" \
+              --versioning-configuration Status=Enabled
+              
+            aws s3api put-bucket-encryption --bucket "$BUCKET_NAME" \
+              --server-side-encryption-configuration '{
+                "Rules": [
+                  {
+                    "ApplyServerSideEncryptionByDefault": {
+                      "SSEAlgorithm": "AES256"
+                    }
+                  }
+                ]
+              }'
+              
+            aws s3api put-public-access-block --bucket "$BUCKET_NAME" \
+              --public-access-block-configuration '{
+                "BlockPublicAcls": true,
+                "IgnorePublicAcls": true,
+                "BlockPublicPolicy": true,
+                "RestrictPublicBuckets": true
+              }'
+              
+            echo "::notice::State Bucket Bootstrap sequence finished successfully."
+          fi

@@ -1,0 +1,50 @@
+name: "02 - Continuous Integration Pipeline"
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform:
+    name: "Static IaC Validation"
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: "Checkout Codebase"
+        uses: actions/checkout@v4
+
+      - name: "Initialize Terraform Engine"
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.8"
+
+      - name: "Enforce Design Syntax Linting"
+        run: terraform -chdir=infra/terraform fmt -check
+
+      - name: "Execute Dry-Run Initializer"
+        run: terraform -chdir=infra/terraform init -backend=false
+
+      - name: "Execute Structural Blueprint Validation"
+        run: terraform -chdir=infra/terraform validate
+
+  containers:
+    name: "Multi-Service Container Validation"
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: "Checkout Codebase"
+        uses: actions/checkout@v4
+
+      - name: "Validate Local Compose Infrastructure Blueprint"
+        run: docker compose config
+
+      - name: "Dry-Run Frontend Container Build"
+        run: docker build --target=base ./Frontend
+
+      - name: "Dry-Run Deep Recon Backend Container Build"
+        run: docker build --target=base ./backend
