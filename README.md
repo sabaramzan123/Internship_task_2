@@ -199,7 +199,7 @@ Users are responsible for complying with all applicable laws and regulations whe
 ### Saba Ramzan
 ### Bilal Naeem
 ### Shahjahan
-### muhammad Muteeb
+### Muhammad Muteeb
 ---
 
 ## ⭐ Support
