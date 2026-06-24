@@ -1,62 +1,103 @@
-FROM python:3.12-bookworm
+# --- Stage 1: System Tools Builder ---
+# Heavy stage: installs Go, downloads all security tool binaries
+FROM python:3.12-slim AS tools-builder
 
-# Environment Setup
 ENV DEBIAN_FRONTEND=noninteractive
 ENV GOPATH=/root/go
-ENV PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
+ENV PATH=$PATH:/usr/local/go/bin:/root/go/bin
 
-# 1. Install Core System Dependencies
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
-    nmap \
     golang \
     wget \
     git \
     unzip \
     curl \
-    whatweb \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Install Stable Go Binaries (Subfinder, HTTPX, Amass)
+# Download & install Go-based security binaries
 RUN wget https://github.com/projectdiscovery/subfinder/releases/download/v2.6.6/subfinder_2.6.6_linux_amd64.zip && \
     unzip -o subfinder_2.6.6_linux_amd64.zip && mv subfinder /usr/local/bin/ && \
     wget https://github.com/projectdiscovery/httpx/releases/download/v1.6.0/httpx_1.6.0_linux_amd64.zip && \
     unzip -o httpx_1.6.0_linux_amd64.zip && mv httpx /usr/local/bin/ && \
     wget https://github.com/OWASP/Amass/releases/download/v4.2.0/amass_linux_amd64.zip && \
     unzip -o amass_linux_amd64.zip && \
-    mv amass_linux_amd64/amass /usr/local/bin/ && \
-    rm -rf *.zip *.md LICENSE amass_linux_amd64 2>/dev/null || true
+    mv amass_Linux_amd64/amass /usr/local/bin/ && \
+    rm -rf *.zip *.md LICENSE amass_Linux_amd64
 
-# 3. Install Smaller Go Tools via go install
+# Install smaller Go tools
 RUN go install -v github.com/tomnomnom/assetfinder@latest && \
     go install -v github.com/tomnomnom/httprobe@latest && \
     go install -v github.com/tomnomnom/waybackurls@latest && \
     go install -v github.com/lc/gau/v2/cmd/gau@latest
 
-# 4. Install Python Tools & Fixes (CloudEnum & Dirsearch Fixed Paths)
-RUN pip install --no-cache-dir --break-system-packages "setuptools<70.0.0" defusedxml
-
-# 🔥 FIXED CLOUDENUM: Standard directory install to handle pyproject.toml without requirements.txt
+# Clone Python-based tools
 RUN git clone https://github.com/initstring/cloud_enum.git /opt/cloudenum && \
-    pip install --no-cache-dir --break-system-packages /opt/cloudenum/ && \
-    chmod +x /opt/cloudenum/cloud_enum.py && \
-    ln -sf /opt/cloudenum/cloud_enum.py /usr/local/bin/cloud_enum && \
-    ln -sf /opt/cloudenum/cloud_enum.py /usr/local/bin/cloudenum
+    git clone https://github.com/maurosoria/dirsearch.git /opt/dirsearch
 
-# Setup Dirsearch (Git version + proper setup)
-RUN git clone https://github.com/maurosoria/dirsearch.git /opt/dirsearch && \
-    chmod +x /opt/dirsearch/dirsearch.py && \
+# --- Stage 2: Python Dependency Builder ---
+# Installs all Python packages into an isolated directory
+FROM python:3.12-slim AS python-builder
+
+WORKDIR /install
+
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir --timeout=120 --prefix=/install/deps \
+    "setuptools<70.0.0" \
+    defusedxml && \
+    pip install --no-cache-dir --timeout=120 --prefix=/install/deps \
+    -r requirements.txt
+
+RUN pip install --no-cache-dir --prefix=/install/deps \
+    "setuptools<70.0.0" defusedxml
+
+# --- Stage 3: Lean Production Runtime ---
+# Only copies what's needed — no compilers, no build tools
+FROM python:3.12-slim AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV GOPATH=/root/go
+ENV PATH=$PATH:/usr/local/go/bin:/root/go/bin:/usr/local/bin
+
+# Runtime-only system packages (no golang, no wget, no git)
+RUN apt-get update && apt-get install -y \
+    nmap \
+    whatweb \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy compiled Go binaries from tools-builder
+COPY --from=tools-builder /usr/local/bin/subfinder /usr/local/bin/
+COPY --from=tools-builder /usr/local/bin/httpx /usr/local/bin/
+COPY --from=tools-builder /usr/local/bin/amass /usr/local/bin/
+COPY --from=tools-builder /root/go/bin/assetfinder /usr/local/bin/
+COPY --from=tools-builder /root/go/bin/httprobe /usr/local/bin/
+COPY --from=tools-builder /root/go/bin/waybackurls /usr/local/bin/
+COPY --from=tools-builder /root/go/bin/gau /usr/local/bin/
+
+# Copy Python tools
+COPY --from=tools-builder /opt/cloudenum /opt/cloudenum
+COPY --from=tools-builder /opt/dirsearch /opt/dirsearch
+
+# Setup symlinks for Python tools
+RUN chmod +x /opt/cloudenum/cloud_enum.py /opt/dirsearch/dirsearch.py && \
+    ln -sf /opt/cloudenum/cloud_enum.py /usr/local/bin/cloud_enum && \
+    ln -sf /opt/cloudenum/cloud_enum.py /usr/local/bin/cloudenum && \
     ln -sf /opt/dirsearch/dirsearch.py /usr/local/bin/dirsearch
 
-# 5. Final App Setup
+# Copy Python dependencies from python-builder
+COPY --from=python-builder /install/deps /usr/local
+
+# App setup
 WORKDIR /app
-
-# Ensure requirements exist or create a dummy one if not present
-COPY requirements.txt .
-RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
-
 COPY . .
 
-# Data directory for scan results
+# Secure env variable declarations (values injected at runtime, not hardcoded)
+ENV API_SECRET_KEY=""
+ENV DATABASE_URL=""
+ENV ALLOWED_ORIGINS=""
+
 RUN mkdir -p /app/data
 
 EXPOSE 8000
