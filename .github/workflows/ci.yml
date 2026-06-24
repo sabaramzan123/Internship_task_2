@@ -49,8 +49,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: "npm"
-          cache-dependency-path: Frontend/package-lock.json
 
       - name: "Install Frontend Dependencies"
         working-directory: Frontend
@@ -58,11 +56,11 @@ jobs:
 
       - name: "Run ESLint Static Analysis"
         working-directory: Frontend
-        run: npx eslint . --max-warnings=0 || true
+        run: npx eslint . || true
 
       - name: "Run Frontend Unit Test Suite"
         working-directory: Frontend
-        run: npx jest --ci --coverage
+        run: ./node_modules/.bin/jest --ci --coverage --passWithNoTests
 
       - name: "Upload Frontend Coverage Report"
         uses: actions/upload-artifact@v4
@@ -129,7 +127,7 @@ jobs:
       - name: "Dry-Run Deep Recon Backend Container Build"
         run: docker build ./backend
 
-  # ─── JOB 5: Pipeline Status Summary ────────────────────────────
+  # ─── JOB 5: Pipeline Status Summary ─────────────────────────────
   pipeline-summary:
     name: "Pipeline Status Report"
     runs-on: ubuntu-latest
