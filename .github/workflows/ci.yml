@@ -54,7 +54,7 @@ jobs:
 
       - name: "Install Frontend Dependencies"
         working-directory: Frontend
-        run: npm ci
+        run: npm install
 
       - name: "Run ESLint Static Analysis"
         working-directory: Frontend
@@ -62,7 +62,7 @@ jobs:
 
       - name: "Run Frontend Unit Test Suite"
         working-directory: Frontend
-        run: npm run test:ci
+        run: npx jest --ci --coverage
 
       - name: "Upload Frontend Coverage Report"
         uses: actions/upload-artifact@v4
