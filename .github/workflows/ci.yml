@@ -60,7 +60,7 @@ jobs:
 
       - name: "Run Frontend Unit Test Suite"
         working-directory: Frontend
-        run: ./node_modules/.bin/jest --ci --coverage --passWithNoTests
+        run: npx jest --ci --coverage --passWithNoTests
 
       - name: "Upload Frontend Coverage Report"
         uses: actions/upload-artifact@v4
